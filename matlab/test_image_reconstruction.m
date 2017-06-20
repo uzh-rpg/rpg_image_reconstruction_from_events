@@ -101,7 +101,7 @@ Id = eye(2);
 disp('Processing events');
 
 close ALL
-fig_show_evol = figure('Color','w');
+fig_show_evol = figure('Color','w', 'units','normalized','outerposition',[0 0 1 1]);
 first_plot = true; % for efficient plotting
 
 iEv = 1; % event counter
@@ -340,9 +340,7 @@ imwrite(rgb_edges,filename_out);
 
 
 %% Pseudo-colored trace ("confidence map")
-figure('Color','w','Name','Trace of covariance (in log10 scale)')
-imshow(log10(trace_map + 1e-3),[]), colorbar
-colormap('jet')
-cmap = colormap;
-colormap(flipud(cmap))
-saveas(gcf, fullfile(folder,'covariance_trace_colored'), 'jpg');
+figure('Color','w','Name','Trace of covariance (in log10 scale)');
+cmap = flipud(colormap('jet'));
+imshow(log10(trace_map + 1e-3),[], 'Colormap',cmap); colorbar
+saveas(gcf, fullfile(folder,'covariance_trace_colored_log_scale'), 'jpg');
