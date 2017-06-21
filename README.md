@@ -47,7 +47,7 @@ A sample of the output produced by the algorithm can be found in [this folder](h
 If you use this code in an academic context, please cite the following references:
 
   1. H. Kim, A. Handa, R. Benosman, S.-H. Ieng, A.J. Davison, 
-  *Simultaneous Mosaicing and Tracking with an Event Camera*.
+  [*Simultaneous Mosaicing and Tracking with an Event Camera*](http://www.bmva.org/bmvc/2014/papers/paper066/).
   British Machine Vision Conference, 2014.
 
   2. H. Rebecq, T. Horstschaefer, G. Gallego, D. Scaramuzza, 
