@@ -1,4 +1,4 @@
-# Image reconstruction from an event camera
+# Image Reconstruction from an Event Camera
 
 This repository contains code for brightness image reconstruction from a rotating event camera. 
 For simplicity, we assume that the orientation of the camera is given, e.g., it is provided by a pose-tracking algorithm or by ground truth camera poses. 
