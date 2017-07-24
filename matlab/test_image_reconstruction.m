@@ -8,8 +8,43 @@
 % University of Zurich
 
 clc; clear; close ALL
-addpath('coordinate_transforms')
-addpath('reconstruction_methods')
+
+
+%% check for toolboxes and reconstruction methods
+% select the reconstruction method. Options are:
+%   'PDE_toolbox_poicalc'  %requires the PDE toolbox
+%   'poisson_neumann'      %requires the image processing toolbox
+%   'frankotchellappa'     %does not require a toolbox
+recontruction_method = 'frankotchellappa'; 
+
+%check which toolboxes are available
+%NOTE:  Returning '1' means that a license for the toolbox is present, but 
+%       it does guarantee that a license server will allow the license to 
+%       be checked out
+use_robotics_system_toolbox = license('test', 'Robotics_System_Toolbox'); %NOT TESTED (requires toolbox to check properly)
+use_PDE_toolbox = license('test', 'PDE_Toolbox'); %NOT TESTED (requires toolbox to check properly)
+use_image_processing_toolbox = license('test', 'Image_Toolbox');
+
+addpath('reconstruction_methods') %may wish to use methods not within the PDE toolbox, even if it is available
+
+if ~use_robotics_system_toolbox %don't bother adding these functions if the robotics system toolbox is available
+    addpath('coordinate_transforms')
+end
+
+%Check that the reconstruction method is compatible with the available toolboxes and give some meaningful feedback if it isn't
+if strcmp(recontruction_method, 'PDE_toolbox_poicalc') %Requires the Partial Differential Equation toolbox
+    if ~use_PDE_toolbox
+        error('Cannot use option "PDE_poicalc" without the PDE toolbox, please select another reconstruction method');
+    end
+elseif strcmp(recontruction_method, 'poisson_neumann') %Requires the Image Processing toolbox
+    if ~use_image_processing_toolbox
+        error('Cannot use option "poisson_neumann" without the image processing toolbox, please select another reconstruction method');
+    end
+elseif strcmp(recontruction_method, 'frankotchellappa') %Does not require a toolbox.
+    %do nothing (this method does not require a toolbox)
+else
+    error(sprintf('"%s" is not a valid reconstruction method. Valid options are: \n\t PDE_toolbox_poicalc  \n\t poisson_neumann \n\t frankotchellappa', recontruction_method));
+end
 
 %% Dataset
 
@@ -49,9 +84,14 @@ quats = quats(:,[4,1:3]); % qw,qx,qy,qz same as Matlab's order
 % Convert quaternions to rotation matrices
 rotmats_ctrl = zeros(3,3,num_poses_ctrl);
 for k = 1:num_poses_ctrl
-%     rotmats_ctrl(:,:,k) = quat2rotm(quats(k,:)); %Requires Robotic System Toolbox
-    rotmats_ctrl(:,:,k) = q2R(quats(k,:)); %Removes the need for Robotic System Toolbox
+    if use_robotics_system_toolbox
+        rotmats_ctrl(:,:,k) = quat2rotm(quats(k,:)); %Requires Robotic System Toolbox
+    else
+        rotmats_ctrl(:,:,k) = q2R(quats(k,:)); %Removes the need for Robotic System Toolbox
+    end
 end
+
+
 
 
 %% Image reconstruction using pixel-wise EKF
@@ -137,7 +177,7 @@ while true
     if (t_ev_mean > time_ctrl(end))
         break; % event later than last known pose
     end
-    Rot = rotationAt(time_ctrl, rotmats_ctrl, t_ev_mean);
+    Rot = rotationAt(time_ctrl, rotmats_ctrl, t_ev_mean, use_robotics_system_toolbox);
     
     % get bearing vector of the event
     bearing_vec = [undist_pix_calibrated(idx_to_mat,:), one_vec].'; % 3xN
@@ -219,7 +259,7 @@ while true
     grad_map_covar.yx(idx_map) = Pg(:,3);
     grad_map_covar.yy(idx_map) = Pg(:,4);
     
-      
+    
     %----------------------------------------------------------------------
     % Visualization every so many batches of events
     iBatch = iBatch + 1;
@@ -238,20 +278,21 @@ while true
         mask = trace_map > 0.05; % reconstruct only gradients with small covariance
         grad_map_clip.x(mask) = 0;
         grad_map_clip.y(mask) = 0;
-
+        
         %The lines below are different reconstruction methods
-        
-        %Method 1: (original) Requires the Partial Differential Equation toolbox
-        %div = divergence(grad_map_clip.x,grad_map_clip.y);
-        %rec_image = reshape( poicalc(-div(:),1,1,pano_height,pano_width), pano_height,pano_width);
-        
-        %Method 2: Requires the Image Processing toolbox
-        %the code is from http://www.cs.cmu.edu/~ILIM/projects/IM/aagrawal/software.html
-        %rec_image = poisson_solver_function_neumann(grad_map_clip.x, grad_map_clip.y);
-        
-        %Method 3: Does not require a toolbox.
-        %the code is from http://www.cs.cmu.edu/~ILIM/projects/IM/aagrawal/software.html
-        rec_image = frankotchellappa(grad_map_clip.x, grad_map_clip.y);
+        if strcmp(recontruction_method, 'PDE_toolbox_poicalc')
+            %Method 1: (original) Requires the Partial Differential Equation toolbox
+            div = divergence(grad_map_clip.x,grad_map_clip.y);
+            rec_image = reshape( poicalc(-div(:),1,1,pano_height,pano_width), pano_height,pano_width);
+        elseif strcmp(recontruction_method, 'poisson_neumann')
+            %Method 2: Requires the Image Processing toolbox
+            %the code is from http://www.cs.cmu.edu/~ILIM/projects/IM/aagrawal/software.html
+            rec_image = poisson_solver_function_neumann(grad_map_clip.x, grad_map_clip.y);
+        elseif strcmp(recontruction_method, 'frankotchellappa')
+            %Method 3: Does not require a toolbox.
+            %the code is from http://www.cs.cmu.edu/~ILIM/projects/IM/aagrawal/software.html
+            rec_image = frankotchellappa(grad_map_clip.x, grad_map_clip.y);
+        end
         
         if first_plot
             subplot(2,2,1),
@@ -266,8 +307,7 @@ while true
             set(gca,'FontSize',20);
             
             % Display reconstructed image
-%             subplot(2,2,2), h_img = imshow(rec_image / max(abs(rec_image(:))),[-1,1]);
-            subplot(2,2,2), h_img = imagesc(rec_image); %let "imagesc" handle the scaling
+            subplot(2,2,2), h_img = imshow(rec_image / max(abs(rec_image(:))),[-1,1]);
             title('Reconstructed image')
             set(gca,'FontSize',20);
             
@@ -283,7 +323,7 @@ while true
             
             first_plot = false;
         else
-            subplot(2,2,1), 
+            subplot(2,2,1),
             idx_pos = pol_events_batch > 0;
             set(h_map_pts(1),'XData',pm(1,idx_pos),'YData',pm(2,idx_pos));
             idx_neg = pol_events_batch < 0;
@@ -343,12 +383,14 @@ imwrite(gy_normalized,filename_out,'Quality',90);
 % Combine gradient magnitude and direction into a single image.
 % Normalize for color coding
 
-% The line below requires the Image Processing Toolbox
-% [g_grad,g_ang] = imgradient(grad_map.x,grad_map.y);
-
-% The lines below do the same as the line above, but remove the need for the toolbox
-g_ang = -atan2d(grad_map.y,grad_map.x);
-g_grad = sqrt(grad_map.x.^2+grad_map.y.^2);
+if use_image_processing_toolbox
+    % The line below requires the Image Processing Toolbox
+     [g_grad,g_ang] = imgradient(grad_map.x,grad_map.y);
+else
+    % The lines below do the same as the line above, but remove the need for the toolbox
+    g_ang = -atan2d(grad_map.y,grad_map.x);
+    g_grad = sqrt(grad_map.x.^2+grad_map.y.^2);
+end
 
 g_grad_unit = g_grad/1;
 g_grad_unit(g_grad_unit > 1.0) = 1.0;
