@@ -29,7 +29,11 @@ else
     % interpolation parameter in [0,1]
     dt = (t_query - t_0) / (t_1 - t_0);
     % Linear interpolation, Lie group formulation
-    axang_increm = rotm2axang(rot_0.'*rot_1);
+%     axang_increm = rotm2axang(rot_0.'*rot_1); % Requires Robotic System toolbox
+    axang_increm = R2AA(rot_0.'*rot_1); % Removes dependency on the Robotic System toolbox
+    
     axang_increm(4) = axang_increm(4)*dt;
-    rot_interp = rot_0 * axang2rotm( axang_increm );
+    
+%     rot_interp = rot_0 * axang2rotm( axang_increm ); % Requires Robotic System toolbox
+    rot_interp = rot_0 * AA2R( axang_increm ); % Removes dependency on the Robotic System toolbox
 end

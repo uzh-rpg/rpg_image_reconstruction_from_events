@@ -8,7 +8,8 @@
 % University of Zurich
 
 clc; clear; close ALL
-
+addpath('coordinate_transforms')
+addpath('reconstruction_methods')
 
 %% Dataset
 
@@ -48,7 +49,8 @@ quats = quats(:,[4,1:3]); % qw,qx,qy,qz same as Matlab's order
 % Convert quaternions to rotation matrices
 rotmats_ctrl = zeros(3,3,num_poses_ctrl);
 for k = 1:num_poses_ctrl
-    rotmats_ctrl(:,:,k) = quat2rotm(quats(k,:));
+%     rotmats_ctrl(:,:,k) = quat2rotm(quats(k,:)); %Requires Robotic System Toolbox
+    rotmats_ctrl(:,:,k) = q2R(quats(k,:)); %Removes the need for Robotic System Toolbox
 end
 
 
@@ -236,8 +238,20 @@ while true
         mask = trace_map > 0.05; % reconstruct only gradients with small covariance
         grad_map_clip.x(mask) = 0;
         grad_map_clip.y(mask) = 0;
-        div = divergence(grad_map_clip.x,grad_map_clip.y);
-        rec_image = reshape( poicalc(-div(:),1,1,pano_height,pano_width), pano_height,pano_width);
+
+        %The lines below are different reconstruction methods
+        
+        %Method 1: (original) Requires the Partial Differential Equation toolbox
+        %div = divergence(grad_map_clip.x,grad_map_clip.y);
+        %rec_image = reshape( poicalc(-div(:),1,1,pano_height,pano_width), pano_height,pano_width);
+        
+        %Method 2: Requires the Image Processing toolbox
+        %the code is from http://www.cs.cmu.edu/~ILIM/projects/IM/aagrawal/software.html
+        %rec_image = poisson_solver_function_neumann(grad_map_clip.x, grad_map_clip.y);
+        
+        %Method 3: Does not require a toolbox.
+        %the code is from http://www.cs.cmu.edu/~ILIM/projects/IM/aagrawal/software.html
+        rec_image = frankotchellappa(grad_map_clip.x, grad_map_clip.y);
         
         if first_plot
             subplot(2,2,1),
@@ -252,7 +266,8 @@ while true
             set(gca,'FontSize',20);
             
             % Display reconstructed image
-            subplot(2,2,2), h_img = imshow(rec_image / max(abs(rec_image(:))),[-1,1]);
+%             subplot(2,2,2), h_img = imshow(rec_image / max(abs(rec_image(:))),[-1,1]);
+            subplot(2,2,2), h_img = imagesc(rec_image); %let "imagesc" handle the scaling
             title('Reconstructed image')
             set(gca,'FontSize',20);
             
@@ -327,7 +342,14 @@ imwrite(gy_normalized,filename_out,'Quality',90);
 %% Colored gradient using HSV according to magnitude and direction
 % Combine gradient magnitude and direction into a single image.
 % Normalize for color coding
-[g_grad,g_ang] = imgradient(grad_map.x,grad_map.y);
+
+% The line below requires the Image Processing Toolbox
+% [g_grad,g_ang] = imgradient(grad_map.x,grad_map.y);
+
+% The lines below do the same as the line above, but remove the need for the toolbox
+g_ang = -atan2d(grad_map.y,grad_map.x);
+g_grad = sqrt(grad_map.x.^2+grad_map.y.^2);
+
 g_grad_unit = g_grad/1;
 g_grad_unit(g_grad_unit > 1.0) = 1.0;
 g_ang_unit = g_ang/360 + 0.5;
