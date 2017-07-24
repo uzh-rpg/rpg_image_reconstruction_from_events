@@ -15,7 +15,7 @@ clc; clear; close ALL
 %   'poisson_dirichlet'    % Requires the PDE toolbox
 %   'poisson_neumann'      % Requires the Image Processing toolbox
 %   'frankotchellappa'     % Does not require a toolbox
-integrator_method = 'frankotchellappa';
+integration_method = 'frankotchellappa';
 
 % Check which toolboxes are available
 % NOTE:  Returning '1' means that a license for the toolbox is present, but
@@ -34,23 +34,23 @@ end
 
 % Check that the integration method is compatible with the available
 % toolboxes and give some meaningful feedback if it isn't
-if strcmp(integrator_method, 'poisson_dirichlet')
+if strcmp(integration_method, 'poisson_dirichlet')
     % Requires the Partial Differential Equation toolbox
     if ~use_PDE_toolbox
         error(['Cannot use option "PDE_poicalc" without the PDE toolbox. ' ...
             'Please select another integration method']);
     end
-elseif strcmp(integrator_method, 'poisson_neumann')
+elseif strcmp(integration_method, 'poisson_neumann')
     % Requires the Image Processing toolbox
     if ~use_image_processing_toolbox
         error(['Cannot use option "poisson_neumann" without the image processing toolbox. ' ...
             'Please select another integration method']);
     end
-elseif strcmp(integrator_method, 'frankotchellappa')
+elseif strcmp(integration_method, 'frankotchellappa')
     % Does not require a toolbox.
     % Do nothing (this method does not require a toolbox)
 else
-    error( [integrator_method ' is not a valid integration method. ' ...
+    error( [integration_method ' is not a valid integration method. ' ...
         'Valid options are: \n\t poisson_dirichlet  \n\t poisson_neumann \n\t frankotchellappa'] );
 end
 
@@ -291,19 +291,19 @@ while true
         grad_map_clip.y(mask) = 0;
         
         % The lines below are different integration methods
-        if strcmp(integrator_method, 'poisson_dirichlet')
+        if strcmp(integration_method, 'poisson_dirichlet')
             % Method 1: Dirichlet boundary conditions
             % Requires the Partial Differential Equation toolbox
             div = divergence(grad_map_clip.x,grad_map_clip.y);
             rec_image = reshape( poicalc(-div(:),1,1,pano_height,pano_width), pano_height,pano_width);
             
-        elseif strcmp(integrator_method, 'poisson_neumann')
+        elseif strcmp(integration_method, 'poisson_neumann')
             % Method 2: Neumann boundary conditions
             % Requires the Image Processing toolbox
             % The code is from http://www.cs.cmu.edu/~ILIM/projects/IM/aagrawal/software.html
             rec_image = poisson_solver_function_neumann(grad_map_clip.x, grad_map_clip.y);
             
-        elseif strcmp(integrator_method, 'frankotchellappa')
+        elseif strcmp(integration_method, 'frankotchellappa')
             % Method 3: Neumann boundary conditions
             % Does not require a toolbox
             % The code is from http://www.cs.cmu.edu/~ILIM/projects/IM/aagrawal/software.html
