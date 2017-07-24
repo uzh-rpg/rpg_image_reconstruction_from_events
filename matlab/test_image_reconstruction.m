@@ -10,41 +10,50 @@
 clc; clear; close ALL
 
 
-%% check for toolboxes and reconstruction methods
-% select the reconstruction method. Options are:
-%   'PDE_toolbox_poicalc'  %requires the PDE toolbox
-%   'poisson_neumann'      %requires the image processing toolbox
-%   'frankotchellappa'     %does not require a toolbox
-recontruction_method = 'frankotchellappa'; 
+%% Check for toolboxes and integration methods
+% Select the integration method. Options are:
+%   'poisson_dirichlet'    % Requires the PDE toolbox
+%   'poisson_neumann'      % Requires the Image Processing toolbox
+%   'frankotchellappa'     % Does not require a toolbox
+integrator_method = 'frankotchellappa';
 
-%check which toolboxes are available
-%NOTE:  Returning '1' means that a license for the toolbox is present, but 
-%       it does guarantee that a license server will allow the license to 
-%       be checked out
-use_robotics_system_toolbox = license('test', 'Robotics_System_Toolbox'); %NOT TESTED (requires toolbox to check properly)
-use_PDE_toolbox = license('test', 'PDE_Toolbox'); %NOT TESTED (requires toolbox to check properly)
+% Check which toolboxes are available
+% NOTE:  Returning '1' means that a license for the toolbox is present, but
+%        it does guarantee that a license server will allow the license to
+%        be checked out
+use_robotics_system_toolbox = license('test', 'Robotics_System_Toolbox');
+use_PDE_toolbox = license('test', 'PDE_toolbox');
 use_image_processing_toolbox = license('test', 'Image_Toolbox');
 
-addpath('reconstruction_methods') %may wish to use methods not within the PDE toolbox, even if it is available
+addpath('integration_methods') % Path to different integration methods
 
-if ~use_robotics_system_toolbox %don't bother adding these functions if the robotics system toolbox is available
+if ~use_robotics_system_toolbox 
+    % Use sustitutive functions to those in the robotics system toolbox
     addpath('coordinate_transforms')
 end
 
-%Check that the reconstruction method is compatible with the available toolboxes and give some meaningful feedback if it isn't
-if strcmp(recontruction_method, 'PDE_toolbox_poicalc') %Requires the Partial Differential Equation toolbox
+% Check that the integration method is compatible with the available
+% toolboxes and give some meaningful feedback if it isn't
+if strcmp(integrator_method, 'poisson_dirichlet')
+    % Requires the Partial Differential Equation toolbox
     if ~use_PDE_toolbox
-        error('Cannot use option "PDE_poicalc" without the PDE toolbox, please select another reconstruction method');
+        error(['Cannot use option "PDE_poicalc" without the PDE toolbox. ' ...
+            'Please select another integration method']);
     end
-elseif strcmp(recontruction_method, 'poisson_neumann') %Requires the Image Processing toolbox
+elseif strcmp(integrator_method, 'poisson_neumann')
+    % Requires the Image Processing toolbox
     if ~use_image_processing_toolbox
-        error('Cannot use option "poisson_neumann" without the image processing toolbox, please select another reconstruction method');
+        error(['Cannot use option "poisson_neumann" without the image processing toolbox. ' ...
+            'Please select another integration method']);
     end
-elseif strcmp(recontruction_method, 'frankotchellappa') %Does not require a toolbox.
-    %do nothing (this method does not require a toolbox)
+elseif strcmp(integrator_method, 'frankotchellappa')
+    % Does not require a toolbox.
+    % Do nothing (this method does not require a toolbox)
 else
-    error(sprintf('"%s" is not a valid reconstruction method. Valid options are: \n\t PDE_toolbox_poicalc  \n\t poisson_neumann \n\t frankotchellappa', recontruction_method));
+    error( [integrator_method ' is not a valid integration method. ' ...
+        'Valid options are: \n\t poisson_dirichlet  \n\t poisson_neumann \n\t frankotchellappa'] );
 end
+
 
 %% Dataset
 
@@ -85,9 +94,11 @@ quats = quats(:,[4,1:3]); % qw,qx,qy,qz same as Matlab's order
 rotmats_ctrl = zeros(3,3,num_poses_ctrl);
 for k = 1:num_poses_ctrl
     if use_robotics_system_toolbox
-        rotmats_ctrl(:,:,k) = quat2rotm(quats(k,:)); %Requires Robotic System Toolbox
+        % Requires Robotics System Toolbox
+        rotmats_ctrl(:,:,k) = quat2rotm(quats(k,:));
     else
-        rotmats_ctrl(:,:,k) = q2R(quats(k,:)); %Removes the need for Robotic System Toolbox
+        % Removes the dependency on the Robotics System Toolbox
+        rotmats_ctrl(:,:,k) = q2R(quats(k,:));
     end
 end
 
@@ -121,10 +132,10 @@ grad_initial_variance = 10;
 % Variables related to the reconstructed image mosaic (panorama)
 pano_height = 1024;
 pano_width = 2 * pano_height;
-% gradient map
+% Gradient map
 grad_map.x = zeros(pano_height, pano_width);
 grad_map.y = zeros(pano_height, pano_width);
-% covariance matrix of each gradient pixel
+% Covariance matrix of each gradient pixel
 grad_map_covar.xx =  ones(pano_height, pano_width) * grad_initial_variance;
 grad_map_covar.xy = zeros(pano_height, pano_width);
 grad_map_covar.yx = zeros(pano_height, pano_width);
@@ -151,7 +162,7 @@ iBatch = 1; % packet-of-events counter
 while true
     
     if (iEv + num_events_batch > num_events)
-        break; % there are no more events
+        break; % There are no more events
     end
     
     % Get batch of events
@@ -172,26 +183,26 @@ while true
     idx_to_mat = x_events_batch*sensor_height + y_events_batch + 1;
     t_prev_batch = [event_map(idx_to_mat).sae].';
     
-    % get (interpolated) rotation of current event
+    % Get (interpolated) rotation of current event
     t_ev_mean = (t_events_batch(1) + t_events_batch(end)) * 0.5;
     if (t_ev_mean > time_ctrl(end))
         break; % event later than last known pose
     end
     Rot = rotationAt(time_ctrl, rotmats_ctrl, t_ev_mean, use_robotics_system_toolbox);
     
-    % get bearing vector of the event
+    % Get bearing vector of the event
     bearing_vec = [undist_pix_calibrated(idx_to_mat,:), one_vec].'; % 3xN
     
-    % get map point corresponding to current event
+    % Get map point corresponding to current event
     rotated_vec = Rot0.' * Rot * bearing_vec;
     pm = project_EquirectangularProjection(rotated_vec, pano_width, pano_height);
     
-    % get map point corresponding to previous event at same pixel
+    % Get map point corresponding to previous event at same pixel
     rotated_vec_prev = zeros(size(rotated_vec));
     for ii = 1:num_events_batch
         Rot_prev = event_map(idx_to_mat(ii)).rotation;
         rotated_vec_prev(:,ii) = Rot0.' * Rot_prev * bearing_vec(:,ii);
-        % update last rotation and time of event (SAE)
+        % Update last rotation and time of event (SAE)
         event_map(idx_to_mat(ii)).sae = t_events_batch(ii);
         event_map(idx_to_mat(ii)).rotation = Rot;
     end
@@ -201,11 +212,11 @@ while true
         continue; % initialization phase. Fill in event_map
     end
     
-    % discard nan values
+    % Discard nan values
     mask_uninitialized = isnan(pm_prev(1,:)) | isnan(pm_prev(2,:));
     num_uninitialized = sum(mask_uninitialized);
     if (num_uninitialized > 0)
-        % deleting uninitialized events
+        % Delete uninitialized events
         % disp(['deleting ' num2str(num_uninitialized) ' points'])
         t_events_batch(mask_uninitialized) = [];
         t_prev_batch(mask_uninitialized) = [];
@@ -214,11 +225,11 @@ while true
         pm_prev(:,mask_uninitialized) = [];
     end
     
-    % get time since previous event at same pixel
+    % Get time since previous event at same pixel
     tc = t_events_batch - t_prev_batch;
     event_rate = 1 ./ (tc + 1e-12); % measurement or observation (z)
     
-    % get velocity vector
+    % Get velocity vector
     vel = (pm - pm_prev) .* ([1;1]*event_rate.');
     
     
@@ -246,12 +257,12 @@ while true
         Pg(:,3).*dhdg(:,1) + Pg(:,4).*dhdg(:,2)];
     S_covar_innovation = (dhdg(:,1).*Pg_dhdg(:,1) + dhdg(:,2).*Pg_dhdg(:,2)) + var_R;
     Kalman_gain = Pg_dhdg ./ (S_covar_innovation * [1,1]);
-    % update gradient and covariance
+    % Update gradient and covariance
     gm = gm + Kalman_gain .* (nu_innovation * [1,1]);
     Pg = Pg - [Pg_dhdg(:,1).*Kalman_gain(:,1), Pg_dhdg(:,1).*Kalman_gain(:,2), ...
         Pg_dhdg(:,2).*Kalman_gain(:,1), Pg_dhdg(:,2).*Kalman_gain(:,2)];
     
-    % store updated values
+    % Store updated values
     grad_map.x(idx_map) = gm(:,1);
     grad_map.y(idx_map) = gm(:,2);
     grad_map_covar.xx(idx_map) = Pg(:,1);
@@ -279,19 +290,25 @@ while true
         grad_map_clip.x(mask) = 0;
         grad_map_clip.y(mask) = 0;
         
-        %The lines below are different reconstruction methods
-        if strcmp(recontruction_method, 'PDE_toolbox_poicalc')
-            %Method 1: (original) Requires the Partial Differential Equation toolbox
+        % The lines below are different integration methods
+        if strcmp(integrator_method, 'poisson_dirichlet')
+            % Method 1: Dirichlet boundary conditions
+            % Requires the Partial Differential Equation toolbox
             div = divergence(grad_map_clip.x,grad_map_clip.y);
             rec_image = reshape( poicalc(-div(:),1,1,pano_height,pano_width), pano_height,pano_width);
-        elseif strcmp(recontruction_method, 'poisson_neumann')
-            %Method 2: Requires the Image Processing toolbox
-            %the code is from http://www.cs.cmu.edu/~ILIM/projects/IM/aagrawal/software.html
+            
+        elseif strcmp(integrator_method, 'poisson_neumann')
+            % Method 2: Neumann boundary conditions
+            % Requires the Image Processing toolbox
+            % The code is from http://www.cs.cmu.edu/~ILIM/projects/IM/aagrawal/software.html
             rec_image = poisson_solver_function_neumann(grad_map_clip.x, grad_map_clip.y);
-        elseif strcmp(recontruction_method, 'frankotchellappa')
-            %Method 3: Does not require a toolbox.
-            %the code is from http://www.cs.cmu.edu/~ILIM/projects/IM/aagrawal/software.html
+            
+        elseif strcmp(integrator_method, 'frankotchellappa')
+            % Method 3: Neumann boundary conditions
+            % Does not require a toolbox
+            % The code is from http://www.cs.cmu.edu/~ILIM/projects/IM/aagrawal/software.html
             rec_image = frankotchellappa(grad_map_clip.x, grad_map_clip.y);
+            rec_image = rec_image - mean(rec_image(:));
         end
         
         if first_plot
@@ -384,10 +401,10 @@ imwrite(gy_normalized,filename_out,'Quality',90);
 % Normalize for color coding
 
 if use_image_processing_toolbox
-    % The line below requires the Image Processing Toolbox
-     [g_grad,g_ang] = imgradient(grad_map.x,grad_map.y);
+    % Requires the Image Processing Toolbox
+    [g_grad,g_ang] = imgradient(grad_map.x,grad_map.y);
 else
-    % The lines below do the same as the line above, but remove the need for the toolbox
+    % Same as above, but remove the need for the Image Processing Toolbox
     g_ang = -atan2d(grad_map.y,grad_map.x);
     g_grad = sqrt(grad_map.x.^2+grad_map.y.^2);
 end
