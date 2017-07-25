@@ -30,9 +30,24 @@ use_VR_toolbox = any(strcmp('Simulink 3D Animation', {toolboxes_info.Name}));
 
 addpath('integration_methods') % Path to different integration methods
 
-if ~use_robotics_system_toolbox || ~use_VR_toolbox
-    % Use sustitutive functions to those in the robotics system toolbox
+% Provide function handles to convert from rotation matrix to axis-angle
+% and vice-versa
+if use_robotics_system_toolbox
+    % Use Robotic System toolbox
+    f_r2a = @rotm2axang;
+    f_a2r = @axang2rotm;
+
+elseif use_VR_toolbox
+    % Use VR toolbox
+    f_r2a = @vrrotmat2vec;
+    f_a2r = @vrrotvec2mat;
+    addpath('coordinate_transforms') % Need q2R function
+    
+else
+    % Use custom functions
     addpath('coordinate_transforms')
+    f_r2a = @R2AA;
+    f_a2r = @AA2R;
 end
 
 % Check that the integration method is compatible with the available
@@ -53,8 +68,8 @@ elseif strcmp(integration_method, 'frankotchellappa')
     % Does not require a toolbox.
     % Do nothing (this method does not require a toolbox)
 else
-    error( [integration_method ' is not a valid integration method. ' ...
-        'Valid options are: \n\t poisson_dirichlet  \n\t poisson_neumann \n\t frankotchellappa'] );
+    error([integration_method ' is not a valid integration method. ' ...
+        'Valid options are: \n\t poisson_dirichlet  \n\t poisson_neumann \n\t frankotchellappa']);
 end
 
 
@@ -191,7 +206,7 @@ while true
     if (t_ev_mean > time_ctrl(end))
         break; % event later than last known pose
     end
-    Rot = rotationAt(time_ctrl, rotmats_ctrl, t_ev_mean, use_robotics_system_toolbox, use_VR_toolbox);
+    Rot = rotationAt(time_ctrl, rotmats_ctrl, t_ev_mean, f_r2a, f_a2r);
     
     % Get bearing vector of the event
     bearing_vec = [undist_pix_calibrated(idx_to_mat,:), one_vec].'; % 3xN
