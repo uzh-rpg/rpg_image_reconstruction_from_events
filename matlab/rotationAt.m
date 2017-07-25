@@ -1,4 +1,4 @@
-function rot_interp = rotationAt(t_ctrl, rotmats_ctrl, t_query)
+function rot_interp = rotationAt(t_ctrl, rotmats_ctrl, t_query, use_robotics_system_toolbox)
 % rotationAt Function for linear interpolation of rotations
 % Interpolate the orientation (rotation) at a given time.
 %
@@ -6,6 +6,7 @@ function rot_interp = rotationAt(t_ctrl, rotmats_ctrl, t_query)
 % -t_ctrl: timestamps of discrete set of orientations ("control poses")
 % -rotmats_ctrl: discrete set of rotation matrices
 % -t_query: time of the requested rotation matrix
+% -use_robotics_system_toolbox: true or false, depending on the product licensed
 %
 % Output:
 % -rot_interp: interpolated rotation matrix
@@ -29,7 +30,16 @@ else
     % interpolation parameter in [0,1]
     dt = (t_query - t_0) / (t_1 - t_0);
     % Linear interpolation, Lie group formulation
-    axang_increm = rotm2axang(rot_0.'*rot_1);
-    axang_increm(4) = axang_increm(4)*dt;
-    rot_interp = rot_0 * axang2rotm( axang_increm );
+    rot_increm = rot_0.'*rot_1;
+    if use_robotics_system_toolbox
+        % Requires Robotic System toolbox
+        axang_increm = rotm2axang(rot_increm);
+        axang_increm(4) = axang_increm(4)*dt;
+        rot_interp = rot_0 * axang2rotm( axang_increm );
+    else
+        % Removes dependency on the Robotic System toolbox
+        axang_increm = R2AA(rot_increm);
+        axang_increm(4) = axang_increm(4)*dt;
+        rot_interp = rot_0 * AA2R( axang_increm );
+    end
 end
