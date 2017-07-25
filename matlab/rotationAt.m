@@ -6,7 +6,8 @@ function rot_interp = rotationAt(t_ctrl, rotmats_ctrl, t_query, use_robotics_sys
 % -t_ctrl: timestamps of discrete set of orientations ("control poses")
 % -rotmats_ctrl: discrete set of rotation matrices
 % -t_query: time of the requested rotation matrix
-% -use_robotics_system_toolbox: true or false, depending on the product licensed
+% -use_robotics_system_toolbox: true or false, depending on toolbox availability
+% -use_VR_toolbox: true or false, depending on toolbox availability
 %
 % Output:
 % -rot_interp: interpolated rotation matrix
@@ -36,11 +37,13 @@ else
         axang_increm = rotm2axang(rot_increm);
         axang_increm(4) = axang_increm(4)*dt;
         rot_interp = rot_0 * axang2rotm( axang_increm );
+        
     elseif use_VR_toolbox
         % Requires VR toolbox
         axang_increm = vrrotmat2vec(rot_increm);
         axang_increm(4) = axang_increm(4)*dt;
         rot_interp = rot_0 * vrrotvec2mat( axang_increm );
+        
     else
         % Removes dependency on the Robotic System toolbox
         axang_increm = R2AA(rot_increm);

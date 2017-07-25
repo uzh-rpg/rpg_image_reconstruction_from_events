@@ -21,10 +21,12 @@ integration_method = 'frankotchellappa';
 % NOTE:  Returning '1' means that a license for the toolbox is present, but
 %        it does guarantee that a license server will allow the license to
 %        be checked out
-use_robotics_system_toolbox = license('test', 'Robotics_System_Toolbox');
-v = ver; use_VR_toolbox = any(strcmp('Simulink 3D Animation', {v.Name})); %use VR toolbox if Robotics System is not available
 use_PDE_toolbox = license('test', 'PDE_toolbox');
 use_image_processing_toolbox = license('test', 'Image_Toolbox');
+use_robotics_system_toolbox = license('test', 'Robotics_System_Toolbox');
+% Use VR toolbox if Robotics System is not available
+toolboxes_info = ver;
+use_VR_toolbox = any(strcmp('Simulink 3D Animation', {toolboxes_info.Name}));
 
 addpath('integration_methods') % Path to different integration methods
 
