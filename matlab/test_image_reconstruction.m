@@ -10,12 +10,42 @@
 clc; clear; close ALL
 
 
-%% Check for toolboxes and integration methods
-% Select the integration method. Options are:
-%   'poisson_dirichlet'    % Requires the PDE toolbox
-%   'poisson_neumann'      % Requires the Image Processing toolbox
-%   'frankotchellappa'     % Does not require a toolbox
+%% Dataset ________________________________________________________________
+
+% Synthetic dataset
+% Load DVS intrinsic calibration and undistortion map
+load DVS_synth_undistorted_pixels.mat
+sensor_height = 128; sensor_width = 128;
+folder = '../data/synth1';
+C_th = 0.45; % DVS Contrast threshold
+
+
+%% Main algorithmic parameters ____________________________________________
+
+% Size of the output reconstructed image mosaic (panorama)
+pano_height = 1024;
+pano_width = 2 * pano_height;
+
+% Methods used:
+% 1) Select measurement function used for brightness gradient estimation
+% via Extended Kalman Filter (EKF). Options are: 
+%   'contrast'    : Constrast criterion (Gallego et al. arXiv 2015)
+%   'event rate'  : Event rate criterion (Kim et al. BMVC 2014)
+% Set also the expected noise level (variance of the measurements).
+measurement_criterion = 'contrast';  var_R = (0.17).^2;  % units [C_th]^2
+%measurement_criterion = 'event rate';  var_R = (1e2).^2;  % units [1/second]^2
+
+% 2) Select the gradient integration method. Options are:
+%   'poisson_dirichlet'   : Requires the PDE toolbox
+%   'poisson_neumann'     : Requires the Image Processing toolbox
+%   'frankotchellappa'    : Does not require a toolbox
 integration_method = 'frankotchellappa';
+
+%__________________________________________________________________________
+
+%% Check for toolboxes and integration methods
+disp('Checking for toolboxes and integration methods');
+addpath('integration_methods') % Path to different integration methods
 
 % Check which toolboxes are available
 % NOTE:  Returning '1' means that a license for the toolbox is present, but
@@ -27,8 +57,6 @@ use_robotics_system_toolbox = license('test', 'Robotics_System_Toolbox');
 % Use VR toolbox if Robotics System is not available
 toolboxes_info = ver;
 use_VR_toolbox = any(strcmp('Simulink 3D Animation', {toolboxes_info.Name}));
-
-addpath('integration_methods') % Path to different integration methods
 
 % Provide function handles to convert from rotation matrix to axis-angle
 % and vice-versa
@@ -71,16 +99,6 @@ else
     error([integration_method ' is not a valid integration method. ' ...
         'Valid options are: \n\t poisson_dirichlet  \n\t poisson_neumann \n\t frankotchellappa']);
 end
-
-
-%% Dataset
-
-% Synthetic dataset
-% Load DVS intrinsic calibration and undistortion map
-load DVS_synth_undistorted_pixels.mat
-sensor_height = 128; sensor_width = 128;
-folder = '../data/synth1';
-C_th = 0.45; % DVS Contrast threshold
 
 
 %% Load events
@@ -134,26 +152,12 @@ num_events_batch = 300;
 num_events_display = 100000;
 num_batches_display = floor(num_events_display / num_events_batch);
 
-% Extended Kalman Filter (EKF) parameters
-% CHOOSE one measurement function: "contrast" or "event rate"
-measurement_criterion = 'contrast';
-% measurement_criterion = 'event rate';
-
-if ( strcmpi(measurement_criterion,'contrast') )
-    var_R = (0.17).^2; % Measurement variance using constrast criterion (Gallego et al. arXiv 2015)
-else
-    var_R = 1e4; % Measurement variance using event rate criterion (Kim et al. BMVC 2014)
-end
-grad_initial_variance = 10;
-
-
-% Variables related to the reconstructed image mosaic (panorama)
-pano_height = 1024;
-pano_width = 2 * pano_height;
+% Variables related to the reconstructed image mosaic. EKF initialization
 % Gradient map
 grad_map.x = zeros(pano_height, pano_width);
 grad_map.y = zeros(pano_height, pano_width);
 % Covariance matrix of each gradient pixel
+grad_initial_variance = 10;
 grad_map_covar.xx =  ones(pano_height, pano_width) * grad_initial_variance;
 grad_map_covar.xy = zeros(pano_height, pano_width);
 grad_map_covar.yx = zeros(pano_height, pano_width);
@@ -381,16 +385,19 @@ toc  % measure execution time
 rec_image_normalized = rec_image / max(abs(rec_image(:)));
 figure('Name','Reconstructed image (log scale)');
 imshow(rec_image_normalized,[])
+drawnow
 filename_out = fullfile(folder,'reconstructed_image_log_scale.jpg');
 imwrite(rec_image_normalized+0.5,filename_out,'Quality',90);
 
 rec_image_exp = exp(0.001 + rec_image);
 figure('Name','Reconstructed image (linear scale)');
 imshow(rec_image_exp,[0,5])
+drawnow
 
 trace_map_normalized = trace_map / max(trace_map(:));
 fig_trace = figure('Name','Trace of covariance');
 imshow(trace_map,[]), colorbar
+drawnow
 filename_out = fullfile(folder,'covariance_trace.jpg');
 imwrite(trace_map_normalized,filename_out,'Quality',90);
 
@@ -434,6 +441,7 @@ hsv_img = cat(3, g_ang_unit, g_grad_unit, ones(size(g_ang)));
 rgb_edges = hsv2rgb(hsv_img);
 figure('Name','Gradient (magnitude and direction)')
 imshow(rgb_edges,[])
+drawnow
 filename_out = fullfile(folder,'mosaicing_grad_map_hsv.png');
 imwrite(rgb_edges,filename_out);
 
@@ -442,4 +450,5 @@ imwrite(rgb_edges,filename_out);
 figure('Color','w','Name','Trace of covariance (in log10 scale)');
 cmap = flipud(colormap('jet'));
 imshow(log10(trace_map + 1e-3),[], 'Colormap',cmap); colorbar
+drawnow
 saveas(gcf, fullfile(folder,'covariance_trace_colored_log_scale'), 'jpg');
