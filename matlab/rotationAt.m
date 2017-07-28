@@ -49,7 +49,7 @@ elseif (t_query == t_ctrl(end))
     rot_interp = rotmats_ctrl(end,:);
     
 else
-    idx_0 = find(t_query > t_ctrl,1,'last');
+    idx_0 = find(t_query >= t_ctrl,1,'last');
     % Two rotations and their times
     t_0 = t_ctrl(idx_0);
     t_1 = t_ctrl(idx_0+1);
