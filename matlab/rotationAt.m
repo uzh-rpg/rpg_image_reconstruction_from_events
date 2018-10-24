@@ -43,7 +43,7 @@ end
 
 % Rotation interpolation
 if (t_query < t_ctrl(1) || t_query > t_ctrl(end) )
-    rot_interp = nan * rotmats_ctrl(1,:);
+    rot_interp = nan * rotmats_ctrl(:,:,1);
     
 elseif (t_query == t_ctrl(end))
     rot_interp = rotmats_ctrl(end,:);
