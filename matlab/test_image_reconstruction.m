@@ -203,7 +203,7 @@ while true
     
     % Get time of previous event at same DVS pixel
     idx_to_mat = x_events_batch*sensor_height + y_events_batch + 1;
-    t_prev_batch = [event_map(idx_to_mat).sae].';
+    t_prev_batch = [event_map(idx_to_mat).sae]';
     
     % Get (interpolated) rotation of current event
     t_ev_mean = (t_events_batch(1) + t_events_batch(end)) * 0.5;
@@ -213,17 +213,19 @@ while true
     Rot = rotationAt(time_ctrl, rotmats_ctrl, t_ev_mean, f_r2a, f_a2r);
     
     % Get bearing vector of the event
-    bearing_vec = [undist_pix_calibrated(idx_to_mat,:), one_vec].'; % 3xN
+    bearing_vec = [undist_pix_calibrated(idx_to_mat,:), one_vec]'; % 3xN
     
     % Get map point corresponding to current event
-    rotated_vec = Rot0.' * Rot * bearing_vec;
+    rotated_vec = Rot0' * Rot * bearing_vec;
     pm = project_EquirectangularProjection(rotated_vec, pano_width, pano_height);
     
-    % Get map point corresponding to previous event at same pixel
-    rotated_vec_prev = zeros(size(rotated_vec));
+    % Get map point corresponding to previous event at same pixel location
+    % Rotated vectors: manual matrix-vector multiplication is faster than alternatives
+    rbv = [event_map(idx_to_mat).rotation] .* ...
+        (ones(3,1)*reshape(bearing_vec(:,1:num_events_batch),1,[]));
+    rotated_vec_prev = Rot0'*(rbv(:,1:3:end) + rbv(:,2:3:end) + rbv(:,3:3:end));
+    % Prepare for next events
     for ii = 1:num_events_batch
-        Rot_prev = event_map(idx_to_mat(ii)).rotation;
-        rotated_vec_prev(:,ii) = Rot0.' * Rot_prev * bearing_vec(:,ii);
         % Update last rotation and time of event (SAE)
         event_map(idx_to_mat(ii)).sae = t_events_batch(ii);
         event_map(idx_to_mat(ii)).rotation = Rot;
@@ -234,7 +236,7 @@ while true
         continue; % initialization phase. Fill in event_map
     end
     
-    % Discard nan values
+    % Discard NaN values
     mask_uninitialized = isnan(pm_prev(1,:)) | isnan(pm_prev(2,:));
     num_uninitialized = sum(mask_uninitialized);
     if (num_uninitialized > 0)
@@ -252,7 +254,7 @@ while true
     event_rate = 1 ./ (tc + 1e-12); % measurement or observation (z)
     
     % Get velocity vector
-    vel = (pm - pm_prev) .* ([1;1]*event_rate.');
+    vel = (pm - pm_prev) .* ([1;1]*event_rate');
     
     
     %----------------------------------------------------------------------
@@ -260,26 +262,28 @@ while true
     % Get gradient and covariance at current map points pm
     ir = floor(pm(2,:)); % row is y coordinate
     ic = floor(pm(1,:)); % col is x coordinate
-    idx_map = (ic*pano_height + ir + 1).';
+    idx_map = (ic*pano_height + ir + 1)';
     gm = [grad_map.x(idx_map), grad_map.y(idx_map)];
     Pg = [grad_map_covar.xx(idx_map), grad_map_covar.xy(idx_map), ...
         grad_map_covar.yx(idx_map), grad_map_covar.yy(idx_map)];
     
-    % EKF update
+    % EKF update equations
+    % Compute the innovation and the Jacobian of the measurement function
     if ( strcmpi(measurement_criterion,'contrast') )
         % Use contrast as measurement function
-        dhdg = vel.' .* ((tc .* pol_events_batch)*[1,1]); % deriv. of measurement function
+        dhdg = vel' .* ((tc .* pol_events_batch)*[1,1]); % Jacobian
         nu_innovation = C_th - sum(dhdg .* gm,2);
     else
         % Use the event rate as measurement function
-        dhdg = vel.' ./ ((C_th * pol_events_batch)*[1,1]); % deriv. of measurement function
+        dhdg = vel' ./ ((C_th * pol_events_batch)*[1,1]); % Jacobian
         nu_innovation = event_rate - sum(dhdg .* gm,2);
     end
+    % Compute Kalman gain
     Pg_dhdg = [Pg(:,1).*dhdg(:,1) + Pg(:,2).*dhdg(:,2), ...
         Pg(:,3).*dhdg(:,1) + Pg(:,4).*dhdg(:,2)];
     S_covar_innovation = (dhdg(:,1).*Pg_dhdg(:,1) + dhdg(:,2).*Pg_dhdg(:,2)) + var_R;
     Kalman_gain = Pg_dhdg ./ (S_covar_innovation * [1,1]);
-    % Update gradient and covariance
+    % Update the brightness gradient (i.e., state mean) and its covariance
     gm = gm + Kalman_gain .* (nu_innovation * [1,1]);
     Pg = Pg - [Pg_dhdg(:,1).*Kalman_gain(:,1), Pg_dhdg(:,1).*Kalman_gain(:,2), ...
         Pg_dhdg(:,2).*Kalman_gain(:,1), Pg_dhdg(:,2).*Kalman_gain(:,2)];
@@ -317,7 +321,7 @@ while true
             % Method 1: Dirichlet boundary conditions
             % Requires the Partial Differential Equation toolbox
             div = divergence(grad_map_clip.x,grad_map_clip.y);
-            rec_image = reshape( poicalc(-div(:),1,1,pano_height,pano_width), pano_height,pano_width);
+            rec_image = reshape(poicalc(-div(:),1,1,pano_height,pano_width),pano_height,pano_width);
             
         elseif strcmp(integration_method, 'poisson_neumann')
             % Method 2: Neumann boundary conditions
