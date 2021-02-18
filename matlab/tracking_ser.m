@@ -41,7 +41,7 @@ num_events_batch = 1000;    % for speed-up we process measurements in packets
 %__________________________________________________________________________
 % Output: array with the "trajectory" (history of rotations)
 traj.time = 0; % tuples (t, rotation(t), covar(t))
-traj.rotvec = zeros(3,1); % covariance of state (rotation vector)
+traj.rotmat = zeros(9,1); % state mean (rotation matrix)
 traj.covar = sigma_covar * reshape(eye(3),9,1);
 
 
@@ -49,14 +49,14 @@ traj.covar = sigma_covar * reshape(eye(3),9,1);
 Rot0 = rotmats_ctrl(:,:,1); % to center the map around the first pose
 
 % Debugging: start somewhere in the middle, using ground truth
-t0 = 0.001;
+t0 = 0.001; % fails if t0=0. Need to DEBUG
 idx_t = find(time_ctrl < t0, 1,'last');
 t0 = time_ctrl(idx_t);
 traj.time = time_ctrl(1:idx_t)';
-traj.rotvec = zeros(3,idx_t);
+traj.rotmat = zeros(9,idx_t);
 for k = 1:idx_t
-    ax = rotm2axang( Rot0' * rotmats_ctrl(:,:,k));
-    traj.rotvec(:,k) = ax(1:3)' * ax(4);
+    Rot_mat = Rot0' * rotmats_ctrl(:,:,k);
+    traj.rotmat(:,k) = Rot_mat(:);
     traj.covar(:,k) = sigma_covar * reshape(eye(3),9,1); % Debug: some random initialization
 end
 
@@ -82,8 +82,6 @@ first_plot = true; % for efficient plotting
 iEv = 1; % event counter
 iBatch = 1; % packet-of-events counter
 iEv_last = 1;
-% rotvec_cur = traj.rotvec(1:3,end); % last known rotation
-% covar_cur = reshape(traj.covar(1:9,end),3,3);
 while true
     
     if (iEv + num_events_batch > num_events)
@@ -111,16 +109,13 @@ while true
         
         % Events in a batch are assigned the same rotation
         idx_0 = find( traj.time <= t_ev_mean, 1, 'last');
-        rotvec = rotvec_renormalize(traj.rotvec(:,idx_0));
-        Rot_prev0 = expm_v_SO3(rotvec);
+        Rot_prev0 = reshape(traj.rotmat(:,idx_0),3,3);
         if (idx_0 == numel(traj.time))
             Rot_prev = Rot_prev0;
         else
             % Linear interpolation of rotation
             idx_1 = idx_0 + 1;
-            %Rot_prev1 = expm_v_SO3( traj.rotvec(:,idx_1) );
-            rotvec = rotvec_renormalize(traj.rotvec(:,idx_1));
-            Rot_prev1 = expm_v_SO3(rotvec);
+            Rot_prev1 = reshape(traj.rotmat(:,idx_1),3,3);
             t_ctrl = traj.time([idx_0,idx_1]);
             Rot_prev = rotationAt(t_ctrl, cat(3, Rot_prev0, Rot_prev1), t_ev_mean);
         end
@@ -139,7 +134,7 @@ while true
     % (to avoid storing a rotation per event)
     if (iEv_last + num_events_batch == iEv)
         % Debug: provide values to test
-        rotvec_cur = traj.rotvec(:,end);
+        rotmat_cur = reshape(traj.rotmat(:,end),3,3);
         covar_cur = reshape(traj.covar(:,end),3,3);
         disp(['Last event before debugging: ' num2str(iEv)]);
     end
@@ -149,7 +144,7 @@ while true
     t_cur_state = t_ev_mean;
     t_last_update = traj.time(end);
     delta_t_state = t_cur_state - t_last_update; % time elapsed since last state update
-    rotvec_pred = rotvec_cur; % since process noise is zero-mean
+    rotmat_pred = rotmat_cur; % update using motion model? Arbitrary motion
     % The covariance of the process noise should depend on the time elapsed
     % since the last measurement update: the longer, the larger the covariance.
     covar_process_noise = scale_factor * delta_t_state * eye(3);
@@ -177,9 +172,9 @@ while true
     
     % Compute innovation and Kalman gain
     % First, compute predicted contrast and analytical Jacobian
-    f_contrast = @(x) compute_contrast(idx_notnan, event_map, x, map, ...
+    f_contrast = @(x) compute_contrast_SO3(idx_notnan, event_map, x, map, ...
         undist_pix_calibrated, grad_map);
-    [contrast_pred, df] = f_contrast(rotvec_pred);
+    [contrast_pred, df] = f_contrast(rotmat_pred);
     innov = C_th - pol_events_batch_notnan .* contrast_pred;
     G_jac = (pol_events_batch_notnan * [1 1 1]) .* df;
     
@@ -203,30 +198,27 @@ while true
     % Finally, compute Kalman gain
     Kalman_gain = covar_pred * G_jac' * S_inv_covar_innov;
     
-    % Update rotation vector and covariance
-    rotvec_cur = rotvec_pred + Kalman_gain * innov;
-    if any(isnan(rotvec_cur))
+    % Update rotation mean and covariance
+    % See Barfoot's SER book, Section 8.2.4.
+    rotmat_cur = expm_v_SO3(Kalman_gain * innov)*rotmat_pred;
+    if any(isnan(rotmat_cur))
         break;
     end
-    % renormalization improves the covariance. It only needs to be done
-    % once in a while.
-    rotvec_cur = rotvec_renormalize(rotvec_cur);
     % Joseph's form covariance update requires computing S_covar_innovation;
     % the usual update is faster (and seems to preserve symmetry)
     covar_cur = covar_pred - Kalman_gain * G_jac * covar_pred;
     
     % Prepare for next events
-    Rot = expm_v_SO3( rotvec_cur );
     for ii = 1:num_events_batch
         % Update last rotation
-        event_map(idx_to_mat(ii)).rotation = Rot;
+        event_map(idx_to_mat(ii)).rotation = rotmat_cur;
     end
     
     % Store current rotation in state history array (trajectory)
     if (delta_t_state > 1e-3)
         disp(['Saving pose: Event # ' num2str(iEv)]);
         traj.time = [traj.time, t_cur_state];
-        traj.rotvec = [traj.rotvec, rotvec_cur(:)];
+        traj.rotmat = [traj.rotmat, rotmat_cur(:)];
         traj.covar = [traj.covar, covar_cur(:)];
     end
     
@@ -253,7 +245,7 @@ while true
         pm_gt = project_EquirectangularProjection(rotated_vec, pano_width, pano_height);
 
         % Using currently estimated rotation:
-        Rot = expm_v_SO3( rotvec_cur );
+        Rot = rotmat_cur;
         % Get map point corresponding to current event
         rotated_vec = Rot * bearing_vec;
         pm = project_EquirectangularProjection(rotated_vec, pano_width, pano_height);
@@ -293,7 +285,8 @@ figure,
 num = numel(traj.time);
 rotvec_ballpi = zeros(3,num);
 for k = 1:num
-    rotvec_ballpi(:,k) = rotvec_renormalize(traj.rotvec(:,k));
+    axang = rotm2axang(reshape(traj.rotmat(:,k),3,3));
+    rotvec_ballpi(:,k) = axang(1:3)' * axang(4);
 end
 % Actual plot
 ax = gca;
