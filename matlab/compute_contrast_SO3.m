@@ -1,4 +1,4 @@
-function [contrast, Jac] = compute_contrast(idx_to_mat, event_map, rotvec_pred, map, ...
+function [contrast, Jac] = compute_contrast_SO3(idx_to_mat, event_map, rotmat_pred, map, ...
     undist_pix_calibrated, grad_map)
 % compute_contrast Measurement function for EKF correction step
 %
@@ -16,8 +16,10 @@ function [contrast, Jac] = compute_contrast(idx_to_mat, event_map, rotvec_pred, 
 % Output:
 % -contrast(N,1): predicted contrast of current event(s) according to two
 %            rotations and the map 
-% -Jac(N,3): each row is the gradient of the contrast with respect to the
-%            current state (rotation vector)
+% % -Jac(N,3): each row is the gradient of the contrast with respect to the
+% %            current state (rotation vector)
+
+assert(all(size(rotmat_pred)==3)); % 3x3, rotation mat
 
 num_events_batch = numel(idx_to_mat);
 [pano_height,pano_width] = size(map);
@@ -27,7 +29,7 @@ one_vec = ones(num_events_batch,1);
 bearing_vec = [undist_pix_calibrated(idx_to_mat,:), one_vec]'; % 3xN
     
 % 2a. Get map point corresponding to current event
-Rot = expm_v_SO3(rotvec_pred);
+Rot = rotmat_pred;
 rotated_bvec = Rot * bearing_vec;
 if (nargout > 1)
     [pm,dpm_d3D] = project_EquirectangularProjection(rotated_bvec, pano_width, pano_height);
@@ -64,6 +66,7 @@ pm_prev = project_EquirectangularProjection(rotated_vec_prev, pano_width, pano_h
 % One function call instead of two is more efficient
 %M_ = interp2(1:pano_width, 1:pano_height, map, [pm(1,:),pm_prev(1,:)], [pm(2,:),pm_prev(2,:)]);
 %contrast = M_(1:num_events_batch) - M_(1+num_events_batch:end);
+
 % Faster code than interp2 using griddedInterpolant
 % https://www.somesolvedproblems.com/2017/12/how-do-i-do-fast-bilinear-interpolation.html
 F = griddedInterpolant({1:pano_height,1:pano_width}, map);
@@ -82,7 +85,7 @@ if (nargout > 1) && (nargin > 5)
     M_deriv_x = Fx(pm(2,:), pm(1,:));
     Fy = griddedInterpolant({1:pano_height,1:pano_width}, grad_map.y);
     M_deriv_y = Fy(pm(2,:), pm(1,:));
-
+    
     % Derivative of the 2D point pm wrt rotated_bvec
     Jac = (M_deriv_x' * [1 1 1]) .* (squeeze(dpm_d3D(1,:,:))') + ...
         (M_deriv_y' * [1 1 1]) .* (squeeze(dpm_d3D(2,:,:))');
@@ -96,20 +99,11 @@ if (nargout > 1) && (nargin > 5)
 %     end
 %     norm(err)
 
-    % Derivative of rotated_bvec wrt rotvec_pred (the state)
-    v = rotvec_pred;
-    matrix_factor = (v*v' + (Rot'-eye(3))*v2skew(v)) / (norm(v).^2);
-    
-%     err = -ones(1,num_events_batch);
-    for ii = 1:num_events_batch
-        % Gallego and Yezzi, JMIV 2014. Formula for rotvec in [0,pi]
-        drotated_bvec_dv = -Rot * v2skew(bearing_vec(:,ii)) * matrix_factor;
-        
-%         % Check analytical derivative
-%         J_num = fdjac(rotvec_pred,'test_expm',bearing_vec(:,ii));
-%         err(ii) = norm(J_num - drotated_bvec_dv,'fro')/norm(J_num,'fro');
-        
-        Jac(ii,:) = Jac(ii,:) * drotated_bvec_dv;
-    end
-%     norm(err)
+    % Derivative of rotated_bvec wrt the state perturbation
+    rotated_bvec = Rot*bearing_vec;
+%     for ii = 1:num_events_batch
+%         drotated_bvec_dv = - Cross2Matrix(rotated_bvec(:,ii));
+%         Jac(ii,:) = Jac(ii,:) * drotated_bvec_dv;
+%     end
+    Jac = cross(rotated_bvec',Jac,2);
 end

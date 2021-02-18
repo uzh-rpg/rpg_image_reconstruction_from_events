@@ -3,8 +3,7 @@
 clear; close ALL; clc
 
 % Prototyping numerical derivatives
-%addpath('/home/ggb/pCloudDrive/MATLAB/MVGToolbox/General/Derivatives');
-%addpath('/home/ggb/pCloudDrive/MATLAB/MVGToolbox/General/Matrices');
+addpath('/home/ggb/pCloudDrive/MATLAB/MVGToolbox/General/Derivatives');
 
 
 % % Synthetic dataset
@@ -28,10 +27,9 @@ kernel_1 = 0.5*[-1 0 1]; % gradient kernel
 grad_map.x = filter2(kernel_1  ,map); % vertical edges
 grad_map.y = filter2(kernel_1.',map); % horizontal edges
 
-
 % Array with the "trajectory" (history of rotations)
 traj.time = 0; % tuples (t, rotation(t), covar(t))
-traj.rotvec = zeros(3,1); % covariance of state (rotation vector)
+traj.rotmat = zeros(9,1); % state mean (rotation matrix)
 sigma_covar = 1e-3;
 traj.covar = sigma_covar * reshape(eye(3),9,1);
 var_meas_noise = (0.17)^2; % variance of measurement noise
@@ -51,21 +49,21 @@ s.rotation = eye(3)*nan;
 event_map = repmat(s, sensor_height, sensor_width);
 
 % Debugging: start somewhere in the middle, using ground truth
-t0 = 0.001;
+t0 = 0.001; % fails of t0=0. Need to DEBUG
 idx_t = find(time_ctrl < t0, 1,'last');
 t0 = time_ctrl(idx_t);
 traj.time = time_ctrl(1:idx_t)';
-traj.rotvec = zeros(3,idx_t);
+traj.rotmat = zeros(9,idx_t);
 for k = 1:idx_t
-    ax = rotm2axang( Rot0' * rotmats_ctrl(:,:,k));
-    traj.rotvec(:,k) = ax(1:3)' * ax(4);
+    Rot_mat = Rot0' * rotmats_ctrl(:,:,k);
+    traj.rotmat(:,k) = Rot_mat(:);
     traj.covar(:,k) = sigma_covar * reshape(eye(3),9,1); % Debug: some random initialization
 end
 
 
 %%
 
-profile('on','-detail','builtin','-timer','performance')
+% profile('on','-detail','builtin','-timer','performance')
 tic  % to measure execution time
 
 first_plot = true; % for efficient plotting
@@ -73,10 +71,8 @@ first_plot = true; % for efficient plotting
 iEv = 1; % event counter
 iBatch = 1; % packet-of-events counter
 iEv_last = 1;
-% rotvec_cur = traj.rotvec(1:3,end); % last known rotation
-% covar_cur = reshape(traj.covar(1:9,end),3,3);
-%while true
-while iEv < 400000
+while true
+%while iEv < 500000 
     
     %if (iEv + num_events_batch > num_events/6)
     if (iEv + num_events_batch > num_events)
@@ -105,29 +101,13 @@ while iEv < 400000
         % Set rotations for each event. Simpler: all events are
         % assigned the same rotation
         idx_0 = find( traj.time <= t_ev_mean, 1, 'last');
-        ax = traj.rotvec(:,idx_0);
-        angle = norm(ax);
-        if (angle > 1e-8)
-            ax = ax / angle;
-        else
-            ax = [0 0 1]';
-        end
-        Rot_prev0 = axang2rotm([ax;angle]');
+        Rot_prev0 = reshape(traj.rotmat(:,idx_0),3,3);
         if (idx_0 == numel(traj.time))
             Rot_prev = Rot_prev0;
         else
             % Linear interpolation of rotation
             idx_1 = idx_0 + 1;
-            %Rot_prev1 = expm( Cross2Matrix(traj.rotvec(:,idx_1)) );
-            ax = traj.rotvec(:,idx_1); 
-            angle = norm(ax);
-            if (angle > 1e-8)
-                ax = ax / angle;
-            else
-                ax = [0 0 1]';
-            end
-            Rot_prev1 = axang2rotm([ax;angle]');
-
+            Rot_prev1 = reshape(traj.rotmat(:,idx_1),3,3);
             t_ctrl = traj.time([idx_0,idx_1]);
             Rot_prev = rotationAt(t_ctrl, cat(3, Rot_prev0, Rot_prev1), t_ev_mean);
         end
@@ -138,35 +118,6 @@ while iEv < 400000
             event_map(idx_to_mat(ii)).sae = t_events_batch(ii);
             
             % Set rotations for each event
-%             idx_0 = find( traj.time <= t_events_batch(ii), 1, 'last');
-%             %Rot_prev0 = expm( Cross2Matrix(traj.rotvec(:,idx_0)) );
-%             ax = traj.rotvec(:,idx_0); 
-%             angle = norm(ax);
-%             if (angle > 1e-8)
-%                 ax = ax / angle;
-%             else
-%                 ax = [0 0 1]';
-%             end
-%             Rot_prev0 = axang2rotm([ax;angle]');
-%       
-%             if (idx_0 == numel(traj.time))
-%                 Rot_prev = Rot_prev0;
-%             else
-%                 % Linear interpolation of rotation
-%                 idx_1 = idx_0 + 1;
-%                 %Rot_prev1 = expm( Cross2Matrix(traj.rotvec(:,idx_1)) );
-%                 ax = traj.rotvec(:,idx_1); 
-%                 angle = norm(ax);
-%                 if (angle > 1e-8)
-%                     ax = ax / angle;
-%                 else
-%                     ax = [0 0 1]';
-%                 end
-%                 Rot_prev1 = axang2rotm([ax;angle]');
-%                 
-%                 t_ctrl = traj.time([idx_0,idx_1]);
-%                 Rot_prev = rotationAt(t_ctrl, cat(3, Rot_prev0, Rot_prev1), t_events_batch(ii));
-%             end
             event_map(idx_to_mat(ii)).rotation = Rot_prev;
         end
         
@@ -211,8 +162,8 @@ while iEv < 400000
     % storing a rotation per event)
     if (iEv_last + num_events_batch == iEv)
         % Debug: provide values to test
-        rotvec_cur = traj.rotvec(1:3,end);
-        covar_cur = reshape(traj.covar(1:9,end),3,3);
+        rotmat_cur = reshape(traj.rotmat(:,end),3,3);
+        covar_cur = reshape(traj.covar(:,end),3,3);
         disp('Last event before debugging:'); iEv
     end
     
@@ -221,7 +172,8 @@ while iEv < 400000
     t_cur_state = t_ev_mean;
     t_last_update = traj.time(end);
     delta_t_state = t_cur_state - t_last_update; % time elapsed since last measurement update
-    rotvec_pred = rotvec_cur; % since process noise is zero-mean
+    rotmat_pred = rotmat_cur; % update with motion model? not needed
+    % disp(['satisfy rot mat constraint?: ', num2str(norm(rotmat_pred'*rotmat_pred-eye(3),'fro'))]);
     % The covariance of the process noise should depend on the time elapsed
     % since the last measurement update: the longer, the larger the covariance
     % should be.
@@ -286,20 +238,20 @@ while iEv < 400000
     % Compute innovation and Kalman gain
     
 %     % Numerical derivative
-%     f_contrast_num = @(x) compute_contrast(idx_to_mat_notnan, event_map, x, map, undist_pix_calibrated);
-%     contrast_pred = f_contrast_num(rotvec_pred);
-%     Jacobians = fdjac(rotvec_pred, f_contrast_num);
+%     f_contrast_num = @(x) compute_contrast_SO3(idx_to_mat_notnan, event_map, x, map, undist_pix_calibrated);
+%     contrast_pred = f_contrast_num(rotmat_pred);
+%     Jacobians = fdjac_SO3(rotmat_pred, f_contrast_num);
 %     contrast_pred_num = contrast_pred;
 %     Jacobians_num = Jacobians;
      
     % With analytical derivative (contrat wrt state)
-    f_contrast = @(x) compute_contrast(idx_to_mat_notnan, event_map, x, map, undist_pix_calibrated, grad_map);
-    [contrast_pred, Jacobians] = f_contrast(rotvec_pred);
+    f_contrast = @(x) compute_contrast_SO3(idx_to_mat_notnan, event_map, x, map, undist_pix_calibrated, grad_map);
+    [contrast_pred, Jacobians] = f_contrast(rotmat_pred);
     
 %     norm(contrast_pred_num - contrast_pred) / norm(contrast_pred_num)
 %     norm(Jacobians_num - Jacobians,'fro') / norm(Jacobians_num,'fro')
     
-    innov = -( C_th - pol_events_batch_notnan .* contrast_pred );
+    innov = ( C_th - pol_events_batch_notnan .* contrast_pred );
     grad = (pol_events_batch_notnan * [1 1 1]) .* Jacobians;
     
     
@@ -311,20 +263,46 @@ while iEv < 400000
         innov(idx_nan) = [];
         grad(idx_nan,:) = [];
     end
-    dqdstate = -grad;
-    S_covar_innovation = var_meas_noise * eye(numel(innov)) + dqdstate * covar_pred * dqdstate';
-    Kalman_gain = covar_pred * dqdstate' / S_covar_innovation;
+    dqdstate = grad;
+    %S_covar_innovation = var_meas_noise * eye(numel(innov)) + dqdstate * covar_pred * dqdstate';
+    %S_covar_innovation = var_meas_noise * speye(numel(innov)) + (dqdstate * covar_pred) * dqdstate';
+    
+%     % Faster sum?
+%     S_covar_innovation = dqdstate * covar_pred * dqdstate';
+    num_innov = numel(innov);
+%     S_covar_innovation(1:(num_innov+1):end) = S_covar_innovation(1:(num_innov+1):end) + var_meas_noise;
+
+    %Kalman_gain = covar_pred * dqdstate' / S_covar_innovation;
+    
+    % Using the matrix inversion lemma we invert only a 3x3 matrix, 
+    % and inverting the s*Id matrix is fast, too.
+    precision_meas_noise = 1/var_meas_noise; % precision is inverse of variance
+    
+%     A_inv = precision_meas_noise * speye(numel(innov));
+%     inv_S_covar_innovation = A_inv - (precision_meas_noise*precision_meas_noise) * ...
+%         dqdstate * inv(inv(covar_pred) + precision_meas_noise*(dqdstate'*dqdstate)) * dqdstate';
+
+    % faster
+    inv_S_covar_innovation = - (precision_meas_noise*precision_meas_noise) * ...
+        dqdstate * inv(inv(covar_pred) + precision_meas_noise*(dqdstate'*dqdstate)) * dqdstate';
+    inv_S_covar_innovation(1:(num_innov+1):end) = inv_S_covar_innovation(1:(num_innov+1):end) + precision_meas_noise;
+    
+    Kalman_gain = covar_pred * dqdstate' * inv_S_covar_innovation;
     
     % Update rotation vector and covariance
     increment_state = Kalman_gain * innov;
-    rotvec_cur = rotvec_pred + Kalman_gain * innov;
-    if any(isnan(rotvec_cur))
+    rotmat_cur = expm_v_SO3(increment_state)*rotmat_pred;
+    if any(isnan(rotmat_cur))
         break;
     end
-    covar_cur = covar_pred - Kalman_gain * S_covar_innovation * Kalman_gain';
+    
+    % Joseph form requires to compute S_covar_innovation
+    %covar_cur = covar_pred - Kalman_gain * S_covar_innovation * Kalman_gain';
+    
+    covar_cur = covar_pred - Kalman_gain * dqdstate * covar_pred;
     
     % Update last rotation and time of event (SAE)
-    Rot = expm_v_SO3( rotvec_cur );
+    Rot = rotmat_cur;
     for ii = 1:num_events_batch
         event_map(idx_to_mat(ii)).sae = t_events_batch(ii);
         event_map(idx_to_mat(ii)).rotation = Rot;
@@ -334,7 +312,7 @@ while iEv < 400000
     if (delta_t_state > 1e-3)
         disp(['Storing control pose: Event # ' num2str(iEv)]);
         traj.time = [traj.time, t_cur_state];
-        traj.rotvec = [traj.rotvec, rotvec_cur(:)];
+        traj.rotmat = [traj.rotmat, rotmat_cur(:)];
         traj.covar = [traj.covar, covar_cur(:)];
     end
     
@@ -360,7 +338,7 @@ while iEv < 400000
         pm_gt = project_EquirectangularProjection(rotated_vec, pano_width, pano_height);
 
         % Using currently estimated rotation:
-        Rot = expm_v_SO3( rotvec_cur );
+        Rot = rotmat_cur;
         % Get map point corresponding to current event
         rotated_vec = Rot * bearing_vec;
         pm = project_EquirectangularProjection(rotated_vec, pano_width, pano_height);
@@ -382,7 +360,7 @@ while iEv < 400000
 end
 
 toc  % measure execution time
-profile viewer
+% profile viewer
 
 
 %% Visualize state and covariance
@@ -400,14 +378,7 @@ figure,
 num = numel(traj.time);
 rotvec_ballpi = zeros(3,num);
 for k = 1:num
-    ax = traj.rotvec(:,k);
-    angle = norm(ax);
-    if (angle > 1e-8)
-        ax = ax / angle;
-    else
-        ax = [0 0 1]';
-    end
-    axang = rotm2axang(axang2rotm([ax;angle]'));
+    axang = rotm2axang(reshape(traj.rotmat(:,k),3,3));
     rotvec_ballpi(:,k) = axang(1:3)' * axang(4);
 end
 % Actual plot
