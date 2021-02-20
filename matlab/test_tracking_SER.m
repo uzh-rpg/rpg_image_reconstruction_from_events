@@ -101,10 +101,10 @@ while true
     t_cur_state = t_ev_mean;
     t_last_update = traj.time(end);
     delta_t_state = t_cur_state - t_last_update;
-    % Predicted mean and covariance ussing motion model
-    rotmat_pred = rotmat_cur; % constant position
-    % The covariance of the process noise depends on the time elapsed since 
-    % the last measurement update: the longer, the larger the covariance.
+    % Predicted mean and covariance using motion model
+    rotmat_pred = rotmat_cur; % constant position model
+    % The covariance of the process noise increases with the time elapsed
+    % since the last measurement update. 
     covar_process_noise = var_process_noise_param * delta_t_state * eye(3);
     covar_pred = covar_cur + covar_process_noise;
     
@@ -118,7 +118,8 @@ while true
     for ii=1:num_events_batch
         if any(isnan(event_map(idx_to_mat(ii)).rotation(:)))
             mask_uninitialized(ii) = 1;
-            event_map(idx_to_mat(ii)).rotation = rotmat_pred; % initialize for next event
+            % initialize for next event
+            event_map(idx_to_mat(ii)).rotation = rotmat_pred;
         end
     end
     num_uninitialized = sum(mask_uninitialized);

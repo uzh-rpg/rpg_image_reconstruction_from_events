@@ -101,10 +101,10 @@ while true
     t_cur_state = t_ev_mean;
     t_last_update = traj.time(end);
     delta_t_state = t_cur_state - t_last_update;
-    % Predicted mean and covariance ussing motion model
-    rotvec_pred = rotvec_cur; % constant position
-    % The covariance of the process noise depends on the time elapsed since 
-    % the last measurement update: the longer, the larger the covariance.
+    % Predicted mean and covariance using motion model
+    rotvec_pred = rotvec_cur; % constant position model
+    % The covariance of the process noise increases with the time elapsed
+    % since the last measurement update. 
     covar_process_noise = var_process_noise_param * delta_t_state * eye(3);
     covar_pred = covar_cur + covar_process_noise;
     
@@ -119,11 +119,12 @@ while true
     for ii=1:num_events_batch
         if any(isnan(event_map(idx_to_mat(ii)).rotation(:)))
             mask_uninitialized(ii) = 1;
+            % initialize for next event
             if (bool_Rot_uninit)
                 Rot_init = expm_v_SO3( rotvec_pred );
                 bool_Rot_uninit = false;
             end
-            event_map(idx_to_mat(ii)).rotation = Rot_init; % initialize for next event
+            event_map(idx_to_mat(ii)).rotation = Rot_init;
         end
     end
     num_uninitialized = sum(mask_uninitialized);
@@ -167,7 +168,7 @@ while true
     if any(isnan(rotvec_cur))
         break;
     end
-    % renormalization improves the covariance. It only needs to be done
+    % Renormalization improves the covariance. It only needs to be done
     % once in a while.
     rotvec_cur = rotvec_renormalize(rotvec_cur);
     % Joseph's form covariance update requires computing S_covar_innovation;
