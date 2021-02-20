@@ -8,6 +8,7 @@
 
 clc; clear; close ALL
 
+addpath('util')
 
 %% Dataset ________________________________________________________________
 
@@ -33,32 +34,20 @@ grad_map.y = filter2(kernel_1',map); % horizontal edges
 
 %% Main algorithmic parameters ____________________________________________
 % Parameters of the EKF
-sigma_covar = 1e-3;         % process noise covariance
-scale_factor = 1e-3;        % for process noise covariance propagation
+var_process_noise_param = 1e-3; % variance of process noise; units [rad^2/s]
 var_meas_noise = (0.17)^2;  % variance of measurement noise; units [C_th]^2
 num_events_batch = 1000;    % for speed-up we process measurements in packets
 
 %__________________________________________________________________________
 % Output: array with the "trajectory" (history of rotations)
+var_init = 1e-3; % initialization
 traj.time = 0; % tuples (t, rotation(t), covar(t))
-traj.rotmat = zeros(9,1); % state mean (rotation matrix)
-traj.covar = sigma_covar * reshape(eye(3),9,1);
+traj.rotmat = reshape(eye(3),9,1); % state mean (rotation matrix)
+traj.covar = var_init * reshape(eye(3),9,1);
 
 
 %% Ground truth poses (for comparison)
 Rot0 = rotmats_ctrl(:,:,1); % to center the map around the first pose
-
-% Debugging: start somewhere in the middle, using ground truth
-t0 = 0.001; % fails if t0=0. Need to DEBUG
-idx_t = find(time_ctrl < t0, 1,'last');
-t0 = time_ctrl(idx_t);
-traj.time = time_ctrl(1:idx_t)';
-traj.rotmat = zeros(9,idx_t);
-for k = 1:idx_t
-    Rot_mat = Rot0' * rotmats_ctrl(:,:,k);
-    traj.rotmat(:,k) = Rot_mat(:);
-    traj.covar(:,k) = sigma_covar * reshape(eye(3),9,1); % Debug: some random initialization
-end
 
 
 %% Tracking of camera orientation using an EKF
@@ -81,7 +70,8 @@ first_plot = true; % for efficient plotting
 
 iEv = 1; % event counter
 iBatch = 1; % packet-of-events counter
-iEv_last = 1;
+rotmat_cur = reshape(traj.rotmat(:,end),3,3); % last known rotation
+covar_cur = reshape(traj.covar(1:9,end),3,3);
 while true
     
     if (iEv + num_events_batch > num_events)
@@ -104,50 +94,18 @@ while true
     % Assume all events in a batch share the same rotation (for speed-up)
     t_ev_mean = (t_events_batch(1) + t_events_batch(end)) * 0.5;
     
-    if ( any(t_events_batch(:) < t0) )
-        iEv_last = iEv;
-        
-        % Events in a batch are assigned the same rotation
-        idx_0 = find( traj.time <= t_ev_mean, 1, 'last');
-        Rot_prev0 = reshape(traj.rotmat(:,idx_0),3,3);
-        if (idx_0 == numel(traj.time))
-            Rot_prev = Rot_prev0;
-        else
-            % Linear interpolation of rotation
-            idx_1 = idx_0 + 1;
-            Rot_prev1 = reshape(traj.rotmat(:,idx_1),3,3);
-            t_ctrl = traj.time([idx_0,idx_1]);
-            Rot_prev = rotationAt(t_ctrl, cat(3, Rot_prev0, Rot_prev1), t_ev_mean);
-        end
-            
-        % Debug: skip the first events but do some bookkeeping
-        for ii=1:num_events_batch
-            % Set rotations for each event
-            event_map(idx_to_mat(ii)).rotation = Rot_prev;
-        end
-        
-        continue;
-    end
-        
-    % State and error covariance are updated using each event.
-    % They are copied to the trajectory array every so many events or time 
-    % (to avoid storing a rotation per event)
-    if (iEv_last + num_events_batch == iEv)
-        % Debug: provide values to test
-        rotmat_cur = reshape(traj.rotmat(:,end),3,3);
-        covar_cur = reshape(traj.covar(:,end),3,3);
-        disp(['Last event before debugging: ' num2str(iEv)]);
-    end
-    
     % EKF
+    
     % 1. Prediction / Propagation
+    % Compute time elapsed since last state update
     t_cur_state = t_ev_mean;
     t_last_update = traj.time(end);
-    delta_t_state = t_cur_state - t_last_update; % time elapsed since last state update
-    rotmat_pred = rotmat_cur; % update using motion model? Arbitrary motion
-    % The covariance of the process noise should depend on the time elapsed
-    % since the last measurement update: the longer, the larger the covariance.
-    covar_process_noise = scale_factor * delta_t_state * eye(3);
+    delta_t_state = t_cur_state - t_last_update;
+    % Predicted mean and covariance ussing motion model
+    rotmat_pred = rotmat_cur; % constant position
+    % The covariance of the process noise depends on the time elapsed since 
+    % the last measurement update: the longer, the larger the covariance.
+    covar_process_noise = var_process_noise_param * delta_t_state * eye(3);
     covar_pred = covar_cur + covar_process_noise;
     
     % 2. Correction / Update
@@ -160,6 +118,7 @@ while true
     for ii=1:num_events_batch
         if any(isnan(event_map(idx_to_mat(ii)).rotation(:)))
             mask_uninitialized(ii) = 1;
+            event_map(idx_to_mat(ii)).rotation = rotmat_pred; % initialize for next event
         end
     end
     num_uninitialized = sum(mask_uninitialized);
@@ -226,9 +185,13 @@ while true
         % Print current event number
         disp(['Update display: Event # ' num2str(iEv)]);
         
-        %%% <!-- DEBUG. Visualization
+        %%% <!-- Visualization estimated vs. ground truth
         % Plot points projected on panoramic image using ground truth pose
         num_events_batch_plot = max([400,num_events_batch]);
+        if (iEv + num_events_batch_plot-1 > num_events)
+            % Check event index is not out of bounds
+            num_events_batch_plot = num_events - iEv;
+        end
         events_batch_plot = events(iEv + (0:num_events_batch_plot-1),:);
         t_events_batch_plot = events_batch_plot(:,1);
         x_events_batch_plot = events_batch_plot(:,2);
@@ -261,7 +224,7 @@ while true
             set(h_map_pts,'XData',pm(1,:),'YData',pm(2,:));
         end
         drawnow
-        %%% DEBUG -->
+        %%% -->
     end
     
 end
